@@ -3,7 +3,7 @@ import pandas as pd
 import math
 import numpy as np
 import plotly.graph_objects as go
-from fpdf import FPDF # Import Library สำหรับสร้าง PDF
+from fpdf import FPDF
 
 # ==========================================
 # 0. SESSION STATE & CALLBACKS
@@ -188,6 +188,7 @@ class PDFReport(FPDF):
 def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     pdf = PDFReport(orientation='P', unit='mm', format='A4')
     pdf.add_page()
+    # fpdf2 doesn't need set_auto_page_break in most cases, but we can keep it
     pdf.set_auto_page_break(auto=True, margin=15)
     
     # --- 1. Geometric Parameters ---
@@ -328,7 +329,8 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     pdf.cell(60, 8, f"{res['Jxy']:,.2f} {u_inertia}", border=1, align='R')
     pdf.ln()
 
-    return pdf.output(dest='S').encode('latin-1')
+    # Generate bytes
+    return bytes(pdf.output())
 
 # ==========================================
 # 4. UI MAIN
