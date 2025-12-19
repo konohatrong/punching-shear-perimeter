@@ -171,7 +171,7 @@ def generate_critical_section(Cx, Cy, dist, col_type):
     return points
 
 # ==========================================
-# 3. REPORT GENERATOR (Using User's Custom Design)
+# 3. REPORT GENERATOR (FOR DOWNLOAD)
 # ==========================================
 def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     # Dynamic Table Rows Generation
@@ -190,32 +190,47 @@ def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
         </tr>
         """
 
-    # HTML Template (Based on User's Code)
+    # HTML Template
     html = f"""
-    <div style="font-family: Tahoma, sans-serif; padding: 10px; background-color: #fff;">
-        
-        <div style="border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px;">
-            <h2 style="margin: 0; color: #000;">Punching Shear Analysis Report</h2>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Punching Shear Report</title>
+        <style>
+            body {{ font-family: Tahoma, sans-serif; padding: 20px; color: #000; }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+            th, td {{ border: 1px solid #ccc; padding: 6px; }}
+            h2 {{ margin: 0; color: #000; }}
+            h4 {{ border-bottom: 1px solid #999; padding-bottom: 5px; margin-top: 25px; }}
+            .header {{ border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }}
+            .note {{ font-size: 11px; color: #666; margin-top: 5px; }}
+            .eq-box {{ margin-bottom: 15px; font-style: italic; color: #444; font-size: 13px; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h2>Punching Shear Analysis Report</h2>
             <p style="margin: 5px 0 0 0; color: #555; font-size: 12px;">Reference Standard: ACI 421.1R-20 Appendix B</p>
         </div>
 
-        <h4 style="border-bottom: 1px solid #999; padding-bottom: 5px; margin-top: 20px;">1. Geometric Parameters</h4>
-        <table style="width: 100%; font-size: 14px;">
+        <h4>1. Geometric Parameters</h4>
+        <table style="font-size: 14px;">
             <tr>
-                <td style="width: 30%;"><strong>Column Dimensions:</strong></td>
-                <td>C<sub>x</sub> = {Cx} {u_len}, C<sub>y</sub> = {Cy} {u_len}</td>
+                <td style="width: 30%; border: none;"><strong>Column Dimensions:</strong></td>
+                <td style="border: none;">C<sub>x</sub> = {Cx} {u_len}, C<sub>y</sub> = {Cy} {u_len}</td>
             </tr>
             <tr>
-                <td><strong>Effective Depth:</strong></td>
-                <td>d = {d} {u_len}</td>
+                <td style="border: none;"><strong>Effective Depth:</strong></td>
+                <td style="border: none;">d = {d} {u_len}</td>
             </tr>
             <tr>
-                <td><strong>Critical Section Distance:</strong></td>
-                <td>dist = {dist_val:.2f} {u_len} (from face)</td>
+                <td style="border: none;"><strong>Critical Section Distance:</strong></td>
+                <td style="border: none;">dist = {dist_val:.2f} {u_len} (from face)</td>
             </tr>
         </table>
 
-        <h4 style="border-bottom: 1px solid #999; padding-bottom: 5px; margin-top: 25px;">2. Properties of Critical Section</h4>
+        <h4>2. Properties of Critical Section</h4>
         <p style="margin-bottom: 10px;">
             <strong>Perimeter (b<sub>o</sub>):</strong> {res['bo']:.2f} {u_len} &nbsp;|&nbsp; 
             <strong>Area (A<sub>c</sub>):</strong> {res['Ac']:.2f} {u_area}
@@ -231,26 +246,26 @@ def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
             Vertical: &nbsp;&nbsp;&nbsp;&nbsp;c<sub>y,bot</sub> = {res['extreme']['cy_neg']:.2f}, c<sub>y,top</sub> = {res['extreme']['cy_pos']:.2f} {u_len}
         </div>
 
-        <h4 style="border-bottom: 1px solid #999; padding-bottom: 5px; margin-top: 25px;">3. Moment of Inertia Calculation (J<sub>c</sub>)</h4>
+        <h4>3. Moment of Inertia Calculation (J<sub>c</sub>)</h4>
 
-        <div style="margin-bottom: 15px; font-style: italic; color: #444; font-size: 13px;">
+        <div class="eq-box">
             <strong>Governing Equations (ACI 421.1R-20 Eq. B.8 & B.9):</strong><br>
             Values are calculated using the summation of segments relative to the centroid (x̄, ȳ).<br>
             J<sub>cx</sub> = d × Σ [ (l/3) × (y<sub>i</sub>² + y<sub>i</sub>y<sub>j</sub> + y<sub>j</sub>² ) ] <br>
             J<sub>cy</sub> = d × Σ [ (l/3) × (x<sub>i</sub>² + x<sub>i</sub>x<sub>j</sub> + x<sub>j</sub>² ) ]
         </div>
 
-        <table style="width: 100%; border-collapse: collapse; font-size: 12px; font-family: Tahoma, sans-serif;">
+        <table>
             <thead>
                 <tr style="background-color: #333; color: #fff;">
-                    <th style="padding: 6px; border: 1px solid #444;">Seg</th>
-                    <th style="padding: 6px; border: 1px solid #444;">Length (l)</th>
-                    <th style="padding: 6px; border: 1px solid #444;">x<sub>i</sub></th>
-                    <th style="padding: 6px; border: 1px solid #444;">y<sub>i</sub></th>
-                    <th style="padding: 6px; border: 1px solid #444;">x<sub>j</sub></th>
-                    <th style="padding: 6px; border: 1px solid #444;">y<sub>j</sub></th>
-                    <th style="padding: 6px; border: 1px solid #444;">J<sub>cx</sub> Contribution</th>
-                    <th style="padding: 6px; border: 1px solid #444;">J<sub>cy</sub> Contribution</th>
+                    <th>Seg</th>
+                    <th>Length (l)</th>
+                    <th>x<sub>i</sub></th>
+                    <th>y<sub>i</sub></th>
+                    <th>x<sub>j</sub></th>
+                    <th>y<sub>j</sub></th>
+                    <th>J<sub>cx</sub> Contribution</th>
+                    <th>J<sub>cy</sub> Contribution</th>
                 </tr>
             </thead>
             <tbody>
@@ -262,10 +277,10 @@ def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
                 </tr>
             </tbody>
         </table>
-        <p style="font-size: 11px; color: #666; margin-top: 5px;">* Coordinates (x, y) shown are relative to the section centroid.</p>
+        <p class="note">* Coordinates (x, y) shown are relative to the section centroid.</p>
 
-        <h4 style="border-bottom: 1px solid #999; padding-bottom: 5px; margin-top: 25px;">4. Final Section Properties</h4>
-        <table style="width: 100%; border: 1px solid #ddd; border-collapse: collapse;">
+        <h4>4. Final Section Properties</h4>
+        <table style="border: 1px solid #ddd;">
             <tr style="background-color: #f0f8ff;">
                 <td style="padding: 10px; border-bottom: 1px solid #ddd;"><strong>J<sub>cx</sub> (Major Axis Inertia):</strong></td>
                 <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: right; font-weight: bold;">{res['Jcx']:,.2f} {u_inertia}</td>
@@ -279,7 +294,8 @@ def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
                 <td style="padding: 10px; text-align: right;">{res['Jxy']:,.2f} {u_inertia}</td>
             </tr>
         </table>
-    </div>
+    </body>
+    </html>
     """
     return html
 
@@ -345,10 +361,18 @@ if res:
     fig.update_layout(title="Critical Section Geometry", width=700, height=600, yaxis=dict(scaleanchor="x", scaleratio=1), hovermode="closest")
     st.plotly_chart(fig, use_container_width=True)
 
-    # Detailed HTML Report
+    # Coordinates Table (Simple View On-Screen)
+    st.subheader("📍 Critical Section Coordinates")
+    coords_data = [{"Point": i+1, f"X ({u_len})": p[0], f"Y ({u_len})": p[1]} for i, p in enumerate(points)]
+    st.dataframe(pd.DataFrame(coords_data).set_index("Point").style.format("{:.2f}"))
+
+    # Download Button for Detailed Report
     st.markdown("---")
-    # st.subheader("📝 Detailed Analysis Report") 
-    # (Commented out subheader to let the HTML report header take lead)
-    
     html_report = generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area)
-    st.markdown(html_report, unsafe_allow_html=True)
+    
+    st.download_button(
+        label="📥 Download Detailed Analysis Report",
+        data=html_report,
+        file_name="Punching_Shear_Report_ACI421.html",
+        mime="text/html"
+    )
