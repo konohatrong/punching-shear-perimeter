@@ -188,7 +188,6 @@ class PDFReport(FPDF):
 def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     pdf = PDFReport(orientation='P', unit='mm', format='A4')
     pdf.add_page()
-    # fpdf2 doesn't need set_auto_page_break in most cases, but we can keep it
     pdf.set_auto_page_break(auto=True, margin=15)
     
     # --- 1. Geometric Parameters ---
@@ -213,16 +212,23 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     pdf.cell(0, 8, "2. Properties of Critical Section", border="B", ln=True)
     pdf.ln(3)
     
-    pdf.set_font("Helvetica", "", 10)
     # Perimeter / Area
-    pdf.cell(40, 6, f"Perimeter (bo):", font_style="B", ln=0)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(40, 6, f"Perimeter (bo):", ln=0)
+    pdf.set_font("Helvetica", "", 10)
     pdf.cell(40, 6, f"{res['bo']:.2f} {u_len}", ln=0)
-    pdf.cell(30, 6, f"Area (Ac):", font_style="B", ln=0)
+    
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(30, 6, f"Area (Ac):", ln=0)
+    pdf.set_font("Helvetica", "", 10)
     pdf.cell(40, 6, f"{res['Ac']:.2f} {u_area}", ln=True)
     
     # Centroid
     pdf.ln(2)
-    pdf.cell(0, 6, "Centroid (Relative to Column Center):", font_style="B", ln=True)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, "Centroid (Relative to Column Center):", ln=True)
+    
+    pdf.set_font("Helvetica", "", 10)
     pdf.cell(10, 6, "", ln=0) # Indent
     pdf.cell(0, 6, f"X-bar = {res['Centroid'][0]:.2f} {u_len},  Y-bar = {res['Centroid'][1]:.2f} {u_len}", ln=True)
     
@@ -329,7 +335,6 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     pdf.cell(60, 8, f"{res['Jxy']:,.2f} {u_inertia}", border=1, align='R')
     pdf.ln()
 
-    # Generate bytes
     return bytes(pdf.output())
 
 # ==========================================
