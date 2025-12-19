@@ -3,6 +3,7 @@ import pandas as pd
 import math
 import numpy as np
 import plotly.graph_objects as go
+from fpdf import FPDF # Import Library สำหรับสร้าง PDF
 
 # ==========================================
 # 0. SESSION STATE & CALLBACKS
@@ -86,11 +87,9 @@ def calculate_section_properties(points, d):
     Jcx_c, Jcy_c, Jxy_c = 0, 0, 0
     x_shifted_all, y_shifted_all = [], []
     
-    # Create detailed segment data for report
     detailed_segments = []
 
     for idx, seg in enumerate(segments):
-        # Shift coordinates relative to Centroid
         xi = seg['p1'][0] - x_bar
         yi = seg['p1'][1] - y_bar
         xj = seg['p2'][0] - x_bar
@@ -100,7 +99,7 @@ def calculate_section_properties(points, d):
         x_shifted_all.extend([xi, xj])
         y_shifted_all.extend([yi, yj])
         
-        # Calculation Terms (ACI 421 App B)
+        # Calculation Terms
         term_y_val = (yi**2 + yi*yj + yj**2)
         jcx_part = d * (l/3) * term_y_val
         
@@ -123,13 +122,11 @@ def calculate_section_properties(points, d):
             "jcy": jcy_part
         })
 
-    # Extreme Fibers
     c_vals = {
         "cx_pos": max(x_shifted_all), "cx_neg": min(x_shifted_all),
         "cy_pos": max(y_shifted_all), "cy_neg": min(y_shifted_all)
     }
 
-    # 1.3 Principal Moments
     avg_J = (Jcx_c + Jcy_c) / 2
     diff_J = (Jcx_c - Jcy_c) / 2
     radius = math.sqrt(diff_J**2 + Jxy_c**2)
@@ -171,133 +168,167 @@ def generate_critical_section(Cx, Cy, dist, col_type):
     return points
 
 # ==========================================
-# 3. REPORT GENERATOR (FOR DOWNLOAD)
+# 3. PDF REPORT GENERATOR (FPDF2)
 # ==========================================
-def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
-    # Dynamic Table Rows Generation
-    rows_html = ""
+class PDFReport(FPDF):
+    def header(self):
+        self.set_font("Helvetica", "B", 16)
+        self.cell(0, 10, "Punching Shear Analysis Report", ln=True)
+        self.set_font("Helvetica", "I", 10)
+        self.set_text_color(100, 100, 100)
+        self.cell(0, 5, "Reference Standard: ACI 421.1R-20 Appendix B", ln=True)
+        self.ln(10) # Line break
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Helvetica", "I", 8)
+        self.set_text_color(128)
+        self.cell(0, 10, f'Page {self.page_no()}', align='C')
+
+def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
+    pdf = PDFReport(orientation='P', unit='mm', format='A4')
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # --- 1. Geometric Parameters ---
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 8, "1. Geometric Parameters", border="B", ln=True)
+    pdf.ln(3)
+    
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(50, 6, "Column Dimensions:", ln=0)
+    pdf.cell(0, 6, f"Cx = {Cx} {u_len}, Cy = {Cy} {u_len}", ln=True)
+    
+    pdf.cell(50, 6, "Effective Depth:", ln=0)
+    pdf.cell(0, 6, f"d = {d} {u_len}", ln=True)
+    
+    pdf.cell(50, 6, "Critical Section Dist:", ln=0)
+    pdf.cell(0, 6, f"{dist_val:.2f} {u_len} (from face)", ln=True)
+    pdf.ln(5)
+    
+    # --- 2. Properties of Critical Section ---
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "2. Properties of Critical Section", border="B", ln=True)
+    pdf.ln(3)
+    
+    pdf.set_font("Helvetica", "", 10)
+    # Perimeter / Area
+    pdf.cell(40, 6, f"Perimeter (bo):", font_style="B", ln=0)
+    pdf.cell(40, 6, f"{res['bo']:.2f} {u_len}", ln=0)
+    pdf.cell(30, 6, f"Area (Ac):", font_style="B", ln=0)
+    pdf.cell(40, 6, f"{res['Ac']:.2f} {u_area}", ln=True)
+    
+    # Centroid
+    pdf.ln(2)
+    pdf.cell(0, 6, "Centroid (Relative to Column Center):", font_style="B", ln=True)
+    pdf.cell(10, 6, "", ln=0) # Indent
+    pdf.cell(0, 6, f"X-bar = {res['Centroid'][0]:.2f} {u_len},  Y-bar = {res['Centroid'][1]:.2f} {u_len}", ln=True)
+    
+    # Extreme Fibers (Box)
+    pdf.ln(2)
+    pdf.set_fill_color(249, 249, 249)
+    pdf.set_font("Helvetica", "", 9)
+    # Draw a box with text inside
+    box_content = (
+        f"Extreme Fiber Distances (from Centroid):\n"
+        f"  Horizontal: cx_left = {res['extreme']['cx_neg']:.2f}, cx_right = {res['extreme']['cx_pos']:.2f} {u_len}\n"
+        f"  Vertical: cy_bot = {res['extreme']['cy_neg']:.2f}, cy_top = {res['extreme']['cy_pos']:.2f} {u_len}"
+    )
+    pdf.multi_cell(0, 5, box_content, border=1, fill=True)
+    pdf.ln(5)
+    
+    # --- 3. Moment of Inertia Calculation ---
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "3. Moment of Inertia Calculation (Jc)", border="B", ln=True)
+    pdf.ln(2)
+    
+    # Equations
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_text_color(80, 80, 80)
+    eq_text = (
+        "Governing Equations (ACI 421.1R-20 Eq. B.8 & B.9):\n"
+        "Values are calculated using the summation of segments relative to the centroid.\n"
+        "Jcx = d * Sum [ (l/3) * (yi^2 + yi*yj + yj^2) ]\n"
+        "Jcy = d * Sum [ (l/3) * (xi^2 + xi*xj + xj^2) ]"
+    )
+    pdf.multi_cell(0, 5, eq_text, border=0)
+    pdf.ln(3)
+    
+    # TABLE Header
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_fill_color(50, 50, 50)
+    pdf.set_text_color(255, 255, 255)
+    
+    # Table Column Widths [Seg, l, xi, yi, xj, yj, Jcx, Jcy]
+    col_w = [10, 20, 20, 20, 20, 20, 35, 35] 
+    headers = ["Seg", "Length", "xi", "yi", "xj", "yj", "Jcx Contrib.", "Jcy Contrib."]
+    
+    for i, h in enumerate(headers):
+        pdf.cell(col_w[i], 7, h, border=1, fill=True, align='C')
+    pdf.ln()
+    
+    # Table Rows
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(0, 0, 0)
+    
+    fill = False
     for seg in res['detailed_segments']:
-        rows_html += f"""
-        <tr>
-            <td style="text-align: center;">{seg['id']}</td>
-            <td style="text-align: right;">{seg['l']:.2f}</td>
-            <td style="text-align: right; color: #555;">{seg['xi']:.2f}</td>
-            <td style="text-align: right; color: #555;">{seg['yi']:.2f}</td>
-            <td style="text-align: right; color: #555;">{seg['xj']:.2f}</td>
-            <td style="text-align: right; color: #555;">{seg['yj']:.2f}</td>
-            <td style="text-align: right; font-weight: bold; background-color: #f0f8ff;">{seg['jcx']:,.0f}</td>
-            <td style="text-align: right; font-weight: bold; background-color: #fff0f0;">{seg['jcy']:,.0f}</td>
-        </tr>
-        """
+        pdf.cell(col_w[0], 6, str(seg['id']), border=1, align='C', fill=fill)
+        pdf.cell(col_w[1], 6, f"{seg['l']:.2f}", border=1, align='R', fill=fill)
+        
+        pdf.set_text_color(100, 100, 100) # Gray for coords
+        pdf.cell(col_w[2], 6, f"{seg['xi']:.2f}", border=1, align='R', fill=fill)
+        pdf.cell(col_w[3], 6, f"{seg['yi']:.2f}", border=1, align='R', fill=fill)
+        pdf.cell(col_w[4], 6, f"{seg['xj']:.2f}", border=1, align='R', fill=fill)
+        pdf.cell(col_w[5], 6, f"{seg['yj']:.2f}", border=1, align='R', fill=fill)
+        
+        pdf.set_text_color(0, 0, 0) # Back to black
+        # Highlight background for J values lightly
+        pdf.set_fill_color(240, 248, 255) # AliceBlue
+        pdf.cell(col_w[6], 6, f"{seg['jcx']:,.0f}", border=1, align='R', fill=True)
+        pdf.set_fill_color(255, 240, 240) # LavenderBlush
+        pdf.cell(col_w[7], 6, f"{seg['jcy']:,.0f}", border=1, align='R', fill=True)
+        pdf.ln()
+        
+    # Total Row
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_fill_color(220, 220, 220)
+    pdf.cell(sum(col_w[:6]), 7, "Total Summation : ", border=1, align='R', fill=True)
+    pdf.cell(col_w[6], 7, f"{res['Jcx']:,.0f}", border=1, align='R', fill=True)
+    pdf.cell(col_w[7], 7, f"{res['Jcy']:,.0f}", border=1, align='R', fill=True)
+    pdf.ln(10)
 
-    # HTML Template
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Punching Shear Report</title>
-        <style>
-            body {{ font-family: Tahoma, sans-serif; padding: 20px; color: #000; }}
-            table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
-            th, td {{ border: 1px solid #ccc; padding: 6px; }}
-            h2 {{ margin: 0; color: #000; }}
-            h4 {{ border-bottom: 1px solid #999; padding-bottom: 5px; margin-top: 25px; }}
-            .header {{ border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }}
-            .note {{ font-size: 11px; color: #666; margin-top: 5px; }}
-            .eq-box {{ margin-bottom: 15px; font-style: italic; color: #444; font-size: 13px; }}
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h2>Punching Shear Analysis Report</h2>
-            <p style="margin: 5px 0 0 0; color: #555; font-size: 12px;">Reference Standard: ACI 421.1R-20 Appendix B</p>
-        </div>
+    # --- 4. Final Section Properties ---
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "4. Final Section Properties", border="B", ln=True)
+    pdf.ln(3)
+    
+    pdf.set_font("Helvetica", "", 10)
+    
+    # Final Result Table
+    # Jcx
+    pdf.set_fill_color(240, 248, 255)
+    pdf.cell(60, 8, "Jcx (Major Axis Inertia):", border=1, fill=True)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(60, 8, f"{res['Jcx']:,.2f} {u_inertia}", border=1, fill=True, align='R')
+    pdf.ln()
+    
+    # Jcy
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_fill_color(255, 240, 240)
+    pdf.cell(60, 8, "Jcy (Minor Axis Inertia):", border=1, fill=True)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(60, 8, f"{res['Jcy']:,.2f} {u_inertia}", border=1, fill=True, align='R')
+    pdf.ln()
+    
+    # Jxy
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(60, 8, "Jxy (Product of Inertia):", border=1)
+    pdf.cell(60, 8, f"{res['Jxy']:,.2f} {u_inertia}", border=1, align='R')
+    pdf.ln()
 
-        <h4>1. Geometric Parameters</h4>
-        <table style="font-size: 14px;">
-            <tr>
-                <td style="width: 30%; border: none;"><strong>Column Dimensions:</strong></td>
-                <td style="border: none;">C<sub>x</sub> = {Cx} {u_len}, C<sub>y</sub> = {Cy} {u_len}</td>
-            </tr>
-            <tr>
-                <td style="border: none;"><strong>Effective Depth:</strong></td>
-                <td style="border: none;">d = {d} {u_len}</td>
-            </tr>
-            <tr>
-                <td style="border: none;"><strong>Critical Section Distance:</strong></td>
-                <td style="border: none;">dist = {dist_val:.2f} {u_len} (from face)</td>
-            </tr>
-        </table>
-
-        <h4>2. Properties of Critical Section</h4>
-        <p style="margin-bottom: 10px;">
-            <strong>Perimeter (b<sub>o</sub>):</strong> {res['bo']:.2f} {u_len} &nbsp;|&nbsp; 
-            <strong>Area (A<sub>c</sub>):</strong> {res['Ac']:.2f} {u_area}
-        </p>
-        <p style="margin-bottom: 10px;">
-            <strong>Centroid (Relative to Column Center):</strong><br>
-            x̄ = {res['Centroid'][0]:.2f} {u_len} <br>
-            ȳ = {res['Centroid'][1]:.2f} {u_len}
-        </p>
-        <div style="background-color: #f9f9f9; padding: 10px; border: 1px dashed #ccc; font-size: 13px;">
-            <strong>Extreme Fiber Distances (from Centroid):</strong><br>
-            Horizontal: c<sub>x,left</sub> = {res['extreme']['cx_neg']:.2f}, c<sub>x,right</sub> = {res['extreme']['cx_pos']:.2f} {u_len}<br>
-            Vertical: &nbsp;&nbsp;&nbsp;&nbsp;c<sub>y,bot</sub> = {res['extreme']['cy_neg']:.2f}, c<sub>y,top</sub> = {res['extreme']['cy_pos']:.2f} {u_len}
-        </div>
-
-        <h4>3. Moment of Inertia Calculation (J<sub>c</sub>)</h4>
-
-        <div class="eq-box">
-            <strong>Governing Equations (ACI 421.1R-20 Eq. B.8 & B.9):</strong><br>
-            Values are calculated using the summation of segments relative to the centroid (x̄, ȳ).<br>
-            J<sub>cx</sub> = d × Σ [ (l/3) × (y<sub>i</sub>² + y<sub>i</sub>y<sub>j</sub> + y<sub>j</sub>² ) ] <br>
-            J<sub>cy</sub> = d × Σ [ (l/3) × (x<sub>i</sub>² + x<sub>i</sub>x<sub>j</sub> + x<sub>j</sub>² ) ]
-        </div>
-
-        <table>
-            <thead>
-                <tr style="background-color: #333; color: #fff;">
-                    <th>Seg</th>
-                    <th>Length (l)</th>
-                    <th>x<sub>i</sub></th>
-                    <th>y<sub>i</sub></th>
-                    <th>x<sub>j</sub></th>
-                    <th>y<sub>j</sub></th>
-                    <th>J<sub>cx</sub> Contribution</th>
-                    <th>J<sub>cy</sub> Contribution</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-                <tr style="background-color: #eee; font-weight: bold; font-size: 13px;">
-                    <td colspan="6" style="text-align: right; padding: 8px; border-top: 2px solid #000;">Total Σ :</td>
-                    <td style="text-align: right; padding: 8px; border-top: 2px solid #000; color: #000;">{res['Jcx']:,.0f}</td>
-                    <td style="text-align: right; padding: 8px; border-top: 2px solid #000; color: #000;">{res['Jcy']:,.0f}</td>
-                </tr>
-            </tbody>
-        </table>
-        <p class="note">* Coordinates (x, y) shown are relative to the section centroid.</p>
-
-        <h4>4. Final Section Properties</h4>
-        <table style="border: 1px solid #ddd;">
-            <tr style="background-color: #f0f8ff;">
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;"><strong>J<sub>cx</sub> (Major Axis Inertia):</strong></td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: right; font-weight: bold;">{res['Jcx']:,.2f} {u_inertia}</td>
-            </tr>
-            <tr style="background-color: #fff0f0;">
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;"><strong>J<sub>cy</sub> (Minor Axis Inertia):</strong></td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: right; font-weight: bold;">{res['Jcy']:,.2f} {u_inertia}</td>
-            </tr>
-            <tr>
-                <td style="padding: 10px;"><strong>J<sub>xy</sub> (Product of Inertia):</strong></td>
-                <td style="padding: 10px; text-align: right;">{res['Jxy']:,.2f} {u_inertia}</td>
-            </tr>
-        </table>
-    </body>
-    </html>
-    """
-    return html
+    return pdf.output(dest='S').encode('latin-1')
 
 # ==========================================
 # 4. UI MAIN
@@ -366,13 +397,13 @@ if res:
     coords_data = [{"Point": i+1, f"X ({u_len})": p[0], f"Y ({u_len})": p[1]} for i, p in enumerate(points)]
     st.dataframe(pd.DataFrame(coords_data).set_index("Point").style.format("{:.2f}"))
 
-    # Download Button for Detailed Report
+    # Download PDF Button
     st.markdown("---")
-    html_report = generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area)
+    pdf_bytes = generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area)
     
     st.download_button(
-        label="📥 Download Detailed Analysis Report",
-        data=html_report,
-        file_name="Punching_Shear_Report_ACI421.html",
-        mime="text/html"
+        label="📥 Download Analysis Report (PDF A4)",
+        data=pdf_bytes,
+        file_name="Punching_Shear_Report_ACI421.pdf",
+        mime="application/pdf"
     )
