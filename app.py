@@ -185,7 +185,26 @@ class PDFReport(FPDF):
         self.set_text_color(128)
         self.cell(0, 10, f'Page {self.page_no()}', align='C')
 
+def clean_text(text):
+    """Replace unicode characters with ASCII for standard PDF fonts"""
+    replacements = {
+        "²": "^2",
+        "⁴": "^4",
+        "θ": "Theta",
+        "Σ": "Sum",
+        "x̄": "x-bar",
+        "ȳ": "y-bar",
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text
+
 def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
+    # Sanitize units for PDF (remove unicode powers)
+    safe_len = clean_text(u_len)
+    safe_area = clean_text(u_area)
+    safe_inertia = clean_text(u_inertia)
+    
     pdf = PDFReport(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -198,13 +217,13 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(50, 6, "Column Dimensions:", ln=0)
-    pdf.cell(0, 6, f"Cx = {Cx} {u_len}, Cy = {Cy} {u_len}", ln=True)
+    pdf.cell(0, 6, f"Cx = {Cx} {safe_len}, Cy = {Cy} {safe_len}", ln=True)
     
     pdf.cell(50, 6, "Effective Depth:", ln=0)
-    pdf.cell(0, 6, f"d = {d} {u_len}", ln=True)
+    pdf.cell(0, 6, f"d = {d} {safe_len}", ln=True)
     
     pdf.cell(50, 6, "Critical Section Dist:", ln=0)
-    pdf.cell(0, 6, f"{dist_val:.2f} {u_len} (from face)", ln=True)
+    pdf.cell(0, 6, f"{dist_val:.2f} {safe_len} (from face)", ln=True)
     pdf.ln(5)
     
     # --- 2. Properties of Critical Section ---
@@ -212,16 +231,15 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     pdf.cell(0, 8, "2. Properties of Critical Section", border="B", ln=True)
     pdf.ln(3)
     
-    # Perimeter / Area
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(40, 6, f"Perimeter (bo):", ln=0)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(40, 6, f"{res['bo']:.2f} {u_len}", ln=0)
+    pdf.cell(40, 6, f"{res['bo']:.2f} {safe_len}", ln=0)
     
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(30, 6, f"Area (Ac):", ln=0)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(40, 6, f"{res['Ac']:.2f} {u_area}", ln=True)
+    pdf.cell(40, 6, f"{res['Ac']:.2f} {safe_area}", ln=True)
     
     # Centroid
     pdf.ln(2)
@@ -230,17 +248,17 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(10, 6, "", ln=0) # Indent
-    pdf.cell(0, 6, f"X-bar = {res['Centroid'][0]:.2f} {u_len},  Y-bar = {res['Centroid'][1]:.2f} {u_len}", ln=True)
+    pdf.cell(0, 6, f"x-bar = {res['Centroid'][0]:.2f} {safe_len},  y-bar = {res['Centroid'][1]:.2f} {safe_len}", ln=True)
     
     # Extreme Fibers (Box)
     pdf.ln(2)
     pdf.set_fill_color(249, 249, 249)
     pdf.set_font("Helvetica", "", 9)
-    # Draw a box with text inside
+    
     box_content = (
         f"Extreme Fiber Distances (from Centroid):\n"
-        f"  Horizontal: cx_left = {res['extreme']['cx_neg']:.2f}, cx_right = {res['extreme']['cx_pos']:.2f} {u_len}\n"
-        f"  Vertical: cy_bot = {res['extreme']['cy_neg']:.2f}, cy_top = {res['extreme']['cy_pos']:.2f} {u_len}"
+        f"  Horizontal: cx_left = {res['extreme']['cx_neg']:.2f}, cx_right = {res['extreme']['cx_pos']:.2f} {safe_len}\n"
+        f"  Vertical: cy_bot = {res['extreme']['cy_neg']:.2f}, cy_top = {res['extreme']['cy_pos']:.2f} {safe_len}"
     )
     pdf.multi_cell(0, 5, box_content, border=1, fill=True)
     pdf.ln(5)
@@ -267,7 +285,6 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     pdf.set_fill_color(50, 50, 50)
     pdf.set_text_color(255, 255, 255)
     
-    # Table Column Widths [Seg, l, xi, yi, xj, yj, Jcx, Jcy]
     col_w = [10, 20, 20, 20, 20, 20, 35, 35] 
     headers = ["Seg", "Length", "xi", "yi", "xj", "yj", "Jcx Contrib.", "Jcy Contrib."]
     
@@ -291,7 +308,7 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
         pdf.cell(col_w[5], 6, f"{seg['yj']:.2f}", border=1, align='R', fill=fill)
         
         pdf.set_text_color(0, 0, 0) # Back to black
-        # Highlight background for J values lightly
+        
         pdf.set_fill_color(240, 248, 255) # AliceBlue
         pdf.cell(col_w[6], 6, f"{seg['jcx']:,.0f}", border=1, align='R', fill=True)
         pdf.set_fill_color(255, 240, 240) # LavenderBlush
@@ -311,14 +328,12 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     pdf.cell(0, 8, "4. Final Section Properties", border="B", ln=True)
     pdf.ln(3)
     
-    pdf.set_font("Helvetica", "", 10)
-    
-    # Final Result Table
     # Jcx
     pdf.set_fill_color(240, 248, 255)
+    pdf.set_font("Helvetica", "", 10)
     pdf.cell(60, 8, "Jcx (Major Axis Inertia):", border=1, fill=True)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(60, 8, f"{res['Jcx']:,.2f} {u_inertia}", border=1, fill=True, align='R')
+    pdf.cell(60, 8, f"{res['Jcx']:,.2f} {safe_inertia}", border=1, fill=True, align='R')
     pdf.ln()
     
     # Jcy
@@ -326,13 +341,13 @@ def generate_pdf_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
     pdf.set_fill_color(255, 240, 240)
     pdf.cell(60, 8, "Jcy (Minor Axis Inertia):", border=1, fill=True)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(60, 8, f"{res['Jcy']:,.2f} {u_inertia}", border=1, fill=True, align='R')
+    pdf.cell(60, 8, f"{res['Jcy']:,.2f} {safe_inertia}", border=1, fill=True, align='R')
     pdf.ln()
     
     # Jxy
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(60, 8, "Jxy (Product of Inertia):", border=1)
-    pdf.cell(60, 8, f"{res['Jxy']:,.2f} {u_inertia}", border=1, align='R')
+    pdf.cell(60, 8, f"{res['Jxy']:,.2f} {safe_inertia}", border=1, align='R')
     pdf.ln()
 
     return bytes(pdf.output())
