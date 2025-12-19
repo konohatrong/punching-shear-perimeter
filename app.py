@@ -101,15 +101,12 @@ def calculate_section_properties(points, d):
         y_shifted_all.extend([yi, yj])
         
         # Calculation Terms (ACI 421 App B)
-        # Jcx term: (yi^2 + yi*yj + yj^2)
         term_y_val = (yi**2 + yi*yj + yj**2)
         jcx_part = d * (l/3) * term_y_val
         
-        # Jcy term: (xi^2 + xi*xj + xj^2)
         term_x_val = (xi**2 + xi*xj + xj**2)
         jcy_part = d * (l/3) * term_x_val
         
-        # Jxy term
         term_xy_val = (2*xi*yi + xi*yj + xj*yi + 2*xj*yj)
         jxy_part = d * (l/6) * term_xy_val
         
@@ -174,10 +171,10 @@ def generate_critical_section(Cx, Cy, dist, col_type):
     return points
 
 # ==========================================
-# 3. REPORT GENERATOR (Classic Engineering Style)
+# 3. REPORT GENERATOR (Using User's Custom Design)
 # ==========================================
-def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia):
-    # Prepare rows for detailed table
+def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area):
+    # Dynamic Table Rows Generation
     rows_html = ""
     for seg in res['detailed_segments']:
         rows_html += f"""
@@ -193,8 +190,9 @@ def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia):
         </tr>
         """
 
+    # HTML Template (Based on User's Code)
     html = f"""
-    <div style="font-family: Tahoma, sans-serif; font-size: 14px; color: #000; padding: 20px; background-color: #fff; border: 1px solid #ccc;">
+    <div style="font-family: Tahoma, sans-serif; padding: 10px; background-color: #fff;">
         
         <div style="border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px;">
             <h2 style="margin: 0; color: #000;">Punching Shear Analysis Report</h2>
@@ -220,7 +218,7 @@ def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia):
         <h4 style="border-bottom: 1px solid #999; padding-bottom: 5px; margin-top: 25px;">2. Properties of Critical Section</h4>
         <p style="margin-bottom: 10px;">
             <strong>Perimeter (b<sub>o</sub>):</strong> {res['bo']:.2f} {u_len} &nbsp;|&nbsp; 
-            <strong>Area (A<sub>c</sub>):</strong> {res['Ac']:.2f} {u_len}²
+            <strong>Area (A<sub>c</sub>):</strong> {res['Ac']:.2f} {u_area}
         </p>
         <p style="margin-bottom: 10px;">
             <strong>Centroid (Relative to Column Center):</strong><br>
@@ -234,7 +232,7 @@ def generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia):
         </div>
 
         <h4 style="border-bottom: 1px solid #999; padding-bottom: 5px; margin-top: 25px;">3. Moment of Inertia Calculation (J<sub>c</sub>)</h4>
-        
+
         <div style="margin-bottom: 15px; font-style: italic; color: #444; font-size: 13px;">
             <strong>Governing Equations (ACI 421.1R-20 Eq. B.8 & B.9):</strong><br>
             Values are calculated using the summation of segments relative to the centroid (x̄, ȳ).<br>
@@ -302,8 +300,8 @@ with st.sidebar:
     st.markdown("---")
     st.header("⚙️ Inputs")
     unit_sys = st.radio("Unit System", ["Imperial (in, psi)", "Metric (mm, MPa)"], key="unit_sys")
-    if "Imperial" in unit_sys: u_len, u_inertia = "in", "in⁴"
-    else: u_len, u_inertia = "mm", "mm⁴"
+    if "Imperial" in unit_sys: u_len, u_area, u_inertia = "in", "in²", "in⁴"
+    else: u_len, u_area, u_inertia = "mm", "mm²", "mm⁴"
 
     col_type = st.selectbox("Column Type", ["Interior", "Edge (Left Free)", "Corner (Top-Left Free)"], key="col_type")
     c_col1, c_col2 = st.columns(2)
@@ -331,7 +329,7 @@ if res:
     # Top Metrics
     m1, m2, m3 = st.columns(3)
     m1.metric("Perimeter (bo)", f"{res['bo']:.2f} {u_len}")
-    m2.metric("Area (Ac)", f"{res['Ac']:.2f} {u_len}²")
+    m2.metric("Area (Ac)", f"{res['Ac']:.2f} {u_area}")
     m3.metric("Centroid (x, y)", f"({res['Centroid'][0]:.2f}, {res['Centroid'][1]:.2f}) {u_len}")
 
     # Plot
@@ -349,6 +347,8 @@ if res:
 
     # Detailed HTML Report
     st.markdown("---")
-    st.subheader("📝 Detailed Analysis Report")
-    html_report = generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia)
+    # st.subheader("📝 Detailed Analysis Report") 
+    # (Commented out subheader to let the HTML report header take lead)
+    
+    html_report = generate_html_report(res, Cx, Cy, d, dist_val, u_len, u_inertia, u_area)
     st.markdown(html_report, unsafe_allow_html=True)
