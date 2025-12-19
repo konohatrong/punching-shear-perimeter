@@ -5,28 +5,74 @@ import numpy as np
 import plotly.graph_objects as go
 
 # ==========================================
-# 1. CORE CALCULATION ENGINE (Appendix B)
+# 0. SESSION STATE & CALLBACKS (For Validation Buttons)
+# ==========================================
+def init_session_state():
+    # Default values (Imperial D.1)
+    defaults = {
+        "unit_sys": "Imperial (in, psi)",
+        "col_type": "Interior",
+        "Cx": 12.0, "Cy": 20.0, "d": 5.62,
+        "calc_mode": "Manual Distance (Trial)",
+        "dist_manual": 25.3,
+        "so": 2.25, "s": 2.75, "n": 9
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
+
+def load_example(ex_id):
+    if ex_id == "D1":
+        st.session_state.unit_sys = "Imperial (in, psi)"
+        st.session_state.col_type = "Interior"
+        st.session_state.Cx = 12.0
+        st.session_state.Cy = 20.0
+        st.session_state.d = 5.62
+        st.session_state.calc_mode = "Manual Distance (Trial)"
+        st.session_state.dist_manual = 25.3 # Trial guess from book
+        
+    elif ex_id == "D2":
+        st.session_state.unit_sys = "Imperial (in, psi)"
+        st.session_state.col_type = "Edge (Left Free)"
+        st.session_state.Cx = 18.0
+        st.session_state.Cy = 18.0
+        st.session_state.d = 5.62
+        st.session_state.calc_mode = "From Stud Layout"
+        st.session_state.so = 2.25
+        st.session_state.s = 2.75
+        st.session_state.n = 9
+        
+    elif ex_id == "D3":
+        st.session_state.unit_sys = "Imperial (in, psi)"
+        st.session_state.col_type = "Corner (Top-Left Free)"
+        st.session_state.Cx = 20.0
+        st.session_state.Cy = 20.0
+        st.session_state.d = 5.62
+        st.session_state.calc_mode = "From Stud Layout"
+        st.session_state.so = 2.25
+        st.session_state.s = 2.5  # Ex D.3 uses s=2.5
+        st.session_state.n = 7    # Ex D.3 uses 7 lines
+
+# Initialize Session State
+init_session_state()
+
+# ==========================================
+# 1. CORE CALCULATION ENGINE
 # ==========================================
 def calculate_section_properties(points, d):
-    """
-    Calculates geometric properties (Area, J, Centroid) of a general punching shear 
-    critical section defined by polygon segments (ACI 421.1R-20 Appendix B).
-    """
-    # 1.1 Calculate Perimeter and Centroid (Line Properties)
+    # 1.1 Calculate Perimeter and Centroid
     total_length = 0
-    sum_mx = 0 # Moment about X-axis (integral y dl)
-    sum_my = 0 # Moment about Y-axis (integral x dl)
+    sum_mx = 0 
+    sum_my = 0 
     
     segments = []
     
     for i in range(len(points) - 1):
         x1, y1 = points[i]
         x2, y2 = points[i+1]
-        
         l = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
         if l == 0: continue
             
-        # Segment Midpoint
         xm = (x1 + x2) / 2
         ym = (y1 + y2) / 2
         
@@ -37,319 +83,290 @@ def calculate_section_properties(points, d):
         
     if total_length == 0: return None
     
-    # Centroid of Critical Section (relative to Column Center)
     x_bar = sum_my / total_length
     y_bar = sum_mx / total_length
     
-    # 1.2 Calculate Inertia about Centroidal Axes (Shifted Axes)
-    # Ref: ACI 421.1R-20 Eq B.8, B.9, B.11
-    Jcx_c = 0
-    Jcy_c = 0
-    Jxy_c = 0
+    # 1.2 Calculate Inertia & Extreme Fibers
+    Jcx_c, Jcy_c, Jxy_c = 0, 0, 0
     
+    # Extreme fibers (Relative to Centroid)
+    # c_x_pos (Right), c_x_neg (Left), c_y_pos (Top/Bot depending on sign)
+    # We collect all points shifted to find max bounds
+    x_shifted_all = []
+    y_shifted_all = []
+
     for seg in segments:
-        # Shift coordinates to Critical Section Centroid
+        # Shift coordinates
         x1_p = seg['p1'][0] - x_bar
         y1_p = seg['p1'][1] - y_bar
         x2_p = seg['p2'][0] - x_bar
         y2_p = seg['p2'][1] - y_bar
         l = seg['l']
         
-        # Eq B.8: Jcx (About X-axis)
+        x_shifted_all.extend([x1_p, x2_p])
+        y_shifted_all.extend([y1_p, y2_p])
+        
+        # Eq B.8, B.9, B.11
         term_y = (y1_p**2 + y1_p*y2_p + y2_p**2)
         Jcx_c += d * (l/3) * term_y
         
-        # Eq B.9: Jcy (About Y-axis)
         term_x = (x1_p**2 + x1_p*x2_p + x2_p**2)
         Jcy_c += d * (l/3) * term_x
         
-        # Eq B.11: Jxy (Product of Inertia)
         term_xy = (2*x1_p*y1_p + x1_p*y2_p + x2_p*y1_p + 2*x2_p*y2_p)
         Jxy_c += d * (l/6) * term_xy
 
-    # 1.3 Calculate Principal Moments (for unsymmetric sections)
+    # Extreme Fiber Distances (c)
+    c_x_max = max(x_shifted_all) # Rightmost fiber
+    c_x_min = min(x_shifted_all) # Leftmost fiber
+    c_y_max = max(y_shifted_all) # Topmost fiber
+    c_y_min = min(y_shifted_all) # Bottommost fiber
+
+    # 1.3 Principal Moments
     avg_J = (Jcx_c + Jcy_c) / 2
     diff_J = (Jcx_c - Jcy_c) / 2
     radius = math.sqrt(diff_J**2 + Jxy_c**2)
     
-    J_max = avg_J + radius # Major Axis
-    J_min = avg_J - radius # Minor Axis
+    J_max = avg_J + radius
+    J_min = avg_J - radius
     
-    # Calculate Principal Angle (Theta)
     if abs(Jcx_c - Jcy_c) < 1e-6:
         theta_rad = 0 if abs(Jxy_c) < 1e-6 else math.pi/4
     else:
-        # Eq B.10
         theta_rad = 0.5 * math.atan2(-2*Jxy_c, (Jcx_c - Jcy_c))
 
     return {
         "bo": total_length,
         "Ac": total_length * d,
         "Centroid": (x_bar, y_bar),
-        "Jcx": Jcx_c,
-        "Jcy": Jcy_c,
-        "Jxy": Jxy_c,
-        "J_major": J_max,
-        "J_minor": J_min,
-        "theta_deg": math.degrees(theta_rad),
-        "segments": segments
+        "Jcx": Jcx_c, "Jcy": Jcy_c, "Jxy": Jxy_c,
+        "J_major": J_max, "J_minor": J_min, "theta_deg": math.degrees(theta_rad),
+        "segments": segments,
+        "extreme": {"cx_pos": c_x_max, "cx_neg": c_x_min, "cy_pos": c_y_max, "cy_neg": c_y_min},
+        "points_shifted": list(zip(x_shifted_all, y_shifted_all)) # For checking
     }
 
 # ==========================================
 # 2. SHAPE GENERATION LOGIC
 # ==========================================
 def generate_critical_section(Cx, Cy, dist, col_type):
-    """
-    Generates polygon points based on column type and distance.
-    Logic follows ACI 421 Fig. B (Octagon logic).
-    """
     hx = Cx / 2
     hy = Cy / 2
-    
-    # Outer boundaries relative to center
     X_far = hx + dist
     Y_far = hy + dist
-    
     points = []
     
     if col_type == "Interior":
-        # Octagon (Closed loop)
         points = [
-            (-hx, Y_far), (hx, Y_far),   # Top Edge
-            (X_far, hy), (X_far, -hy),   # Right Edge
-            (hx, -Y_far), (-hx, -Y_far), # Bottom Edge
-            (-X_far, -hy), (-X_far, hy), # Left Edge
-            (-hx, Y_far)                 # Close Loop
+            (-hx, Y_far), (hx, Y_far), (X_far, hy), (X_far, -hy),
+            (hx, -Y_far), (-hx, -Y_far), (-X_far, -hy), (-X_far, hy), (-hx, Y_far)
         ]
-        
     elif col_type == "Edge (Left Free)":
-        # Open C-Shape (Opening at Left -X)
         points = [
-            (-hx, Y_far),    # Start Top-Left (at Free Edge)
-            (hx, Y_far),     # Top Inner Corner
-            (X_far, hy),     # Top-Right Chamfer
-            (X_far, -hy),    # Bot-Right Chamfer
-            (hx, -Y_far),    # Bot Inner Corner
-            (-hx, -Y_far)    # End Bot-Left (at Free Edge)
+            (-hx, Y_far), (hx, Y_far), (X_far, hy), (X_far, -hy),
+            (hx, -Y_far), (-hx, -Y_far)
         ]
-        
     elif col_type == "Corner (Top-Left Free)":
-        # Open L-Shape (Opening at Top +Y and Left -X)
-        points = [
-            (X_far, hy),     # Start Top-Right (at Free Edge)
-            (X_far, -hy),    # Right-Bot Chamfer
-            (hx, -Y_far),    # Bot Inner Corner
-            (-hx, -Y_far)    # End Bot-Left (at Free Edge)
-        ]
+        points = [(X_far, hy), (X_far, -hy), (hx, -Y_far), (-hx, -Y_far)]
         
     return points
 
 # ==========================================
-# 3. STREAMLIT UI SETUP
+# 3. UI SETUP
 # ==========================================
-st.set_page_config(page_title="Punching Shear Analysis", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="ACI 421 Punching Shear", page_icon="🏗️", layout="wide")
 
 st.title("🏗️ ACI 421.1R-20 Punching Shear Calculator")
-st.markdown("""
-Analysis tool for **Section Properties ($J_c, A_c, b_o$)** of punching shear critical sections.
-Supports **Interior, Edge, and Corner** columns using the **General Polygon Method (Appendix B)**.
-""")
+st.markdown("Analysis tool for **Section Properties** ($J_c, A_c, b_o$) with **ACI 421 Validation Examples**.")
 
-# --- Sidebar: Configuration ---
+# --- Sidebar ---
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("📚 Validation Examples")
+    c1, c2, c3 = st.columns(3)
+    if c1.button("Load D.1"): load_example("D1")
+    if c2.button("Load D.2"): load_example("D2")
+    if c3.button("Load D.3"): load_example("D3")
     
-    # 1. Unit System Selection
-    unit_sys = st.radio("Unit System", ["Imperial (in, psi)", "Metric (mm, MPa)"])
+    st.markdown("---")
+    st.header("⚙️ Inputs")
+    
+    # Bind widgets to session state
+    unit_sys = st.radio("Unit System", ["Imperial (in, psi)", "Metric (mm, MPa)"], key="unit_sys")
     
     if "Imperial" in unit_sys:
-        u_len = "in"
-        u_area = "in²"
-        u_inertia = "in⁴"
-        def_Cx, def_Cy, def_d = 12.0, 20.0, 5.62
-        def_so, def_s = 2.25, 2.75
-        def_trial = 25.3
+        u_len, u_area, u_inertia = "in", "in²", "in⁴"
     else:
-        u_len = "mm"
-        u_area = "mm²"
-        u_inertia = "mm⁴"
-        def_Cx, def_Cy, def_d = 300.0, 500.0, 140.0
-        def_so, def_s = 57.0, 70.0
-        def_trial = 640.0
+        u_len, u_area, u_inertia = "mm", "mm²", "mm⁴"
 
-    st.markdown("---")
-    st.header("1. Column Data")
-    col_type = st.selectbox("Column Type", 
-                            ["Interior", "Edge (Left Free)", "Corner (Top-Left Free)"])
+    col_type = st.selectbox("Column Type", ["Interior", "Edge (Left Free)", "Corner (Top-Left Free)"], key="col_type")
     
-    c1, c2 = st.columns(2)
-    Cx = c1.number_input(f"Width Cx ({u_len})", value=def_Cx, step=1.0)
-    Cy = c2.number_input(f"Depth Cy ({u_len})", value=def_Cy, step=1.0)
-    d = st.number_input(f"Effective Depth d ({u_len})", value=def_d, step=0.1)
+    c_col1, c_col2 = st.columns(2)
+    Cx = c_col1.number_input(f"Cx ({u_len})", key="Cx", step=1.0)
+    Cy = c_col2.number_input(f"Cy ({u_len})", key="Cy", step=1.0)
+    d = st.number_input(f"Effective Depth d ({u_len})", key="d", step=0.1)
     
     st.markdown("---")
-    st.header("2. Critical Section")
-    calc_mode = st.radio("Calculation Mode:", 
-                         ["Manual Distance (Trial)", "From Stud Layout"])
+    calc_mode = st.radio("Mode:", ["Manual Distance (Trial)", "From Stud Layout"], key="calc_mode")
     
     dist_val = 0.0
     if calc_mode == "Manual Distance (Trial)":
-        # Default Trial Guess
-        def_val_dist = def_trial if col_type == "Interior" else d/2
-        dist_val = st.number_input(f"Distance from Face ({u_len})", value=def_val_dist)
-        st.caption(f"Note: d/2 = {d/2:.2f} {u_len}")
+        dist_val = st.number_input(f"Distance ({u_len})", key="dist_manual")
     else:
-        st.subheader("Stud Layout Details")
-        so = st.number_input(f"s0 (First spacing) ({u_len})", value=def_so)
-        s = st.number_input(f"s (Typ. spacing) ({u_len})", value=def_s)
-        n = st.number_input("No. of lines", value=9, min_value=2, step=1)
-        
-        # Distance = s0 + (n-1)s + d/2
+        st.caption("Stud Layout Details")
+        so = st.number_input(f"s0 ({u_len})", key="so")
+        s = st.number_input(f"s ({u_len})", key="s")
+        n = st.number_input("No. of lines", key="n", min_value=2)
         dist_val = so + (n-1)*s + (d/2)
-        st.success(f"Calc. Distance = {dist_val:.2f} {u_len}")
+        st.success(f"Dist = {dist_val:.2f} {u_len}")
 
 # --- Main Calculation ---
 points = generate_critical_section(Cx, Cy, dist_val, col_type)
 res = calculate_section_properties(points, d)
 
 if res:
-    # --- Results Display ---
-    st.subheader(f"Analysis Results: {col_type} Column")
-    st.info(f"Critical Section at distance **{dist_val:.2f} {u_len}** from column face.")
-    
-    # Metrics Row 1
+    # 1. Summary Metrics
+    st.subheader(f"Analysis Summary: {col_type}")
     m1, m2, m3 = st.columns(3)
-    m1.metric(f"Perimeter (bo)", f"{res['bo']:.2f} {u_len}")
-    m2.metric(f"Area (Ac)", f"{res['Ac']:.2f} {u_area}")
-    m3.metric(f"Centroid (x, y)", f"({res['Centroid'][0]:.2f}, {res['Centroid'][1]:.2f}) {u_len}", 
-              help="Relative to Column Center (0,0)")
-
-    st.markdown("---")
+    m1.metric("Perimeter (bo)", f"{res['bo']:.2f} {u_len}")
+    m2.metric("Area (Ac)", f"{res['Ac']:.2f} {u_area}")
+    m3.metric("Centroid (x, y)", f"({res['Centroid'][0]:.2f}, {res['Centroid'][1]:.2f}) {u_len}")
     
-    # J Values
-    st.subheader("Moment of Inertia (J)")
-    
-    # Logic to highlight Principal Moments if Jxy is significant (Corner Case)
-    is_unsymmetric = abs(res['Jxy']) > 1.0 # Tolerance
-    
-    c1, c2 = st.columns(2)
-    
+    # 2. J Values
+    is_unsymmetric = abs(res['Jxy']) > 1.0
+    col1, col2 = st.columns(2)
     if is_unsymmetric:
-        st.warning("⚠️ Unsymmetric Section (Corner): Principal Moments recommended.")
-        c1.metric("J_major (Principal)", f"{res['J_major']:,.2f} {u_inertia}")
-        c2.metric("J_minor (Principal)", f"{res['J_minor']:,.2f} {u_inertia}")
-        st.caption(f"Principal Angle (θ) = {res['theta_deg']:.2f}°")
-        
-        with st.expander("Show Orthogonal J (x,y)"):
-            st.write(f"Jcx: {res['Jcx']:,.2f} {u_inertia}")
-            st.write(f"Jcy: {res['Jcy']:,.2f} {u_inertia}")
-            st.write(f"Jxy: {res['Jxy']:,.2f} {u_inertia}")
+        st.warning("⚠️ Unsymmetric (Corner): Using Principal Moments recommended.")
+        col1.metric("J_major (Principal)", f"{res['J_major']:,.2f} {u_inertia}")
+        col2.metric("J_minor (Principal)", f"{res['J_minor']:,.2f} {u_inertia}")
     else:
-        st.success("✅ Symmetric Section: Orthogonal axes are Principal axes.")
-        c1.metric("Jcx (Major Axis)", f"{res['Jcx']:,.2f} {u_inertia}")
-        c2.metric("Jcy (Minor Axis)", f"{res['Jcy']:,.2f} {u_inertia}")
+        st.success("✅ Symmetric: Orthogonal axes are Principal axes.")
+        col1.metric("Jcx (Major Axis)", f"{res['Jcx']:,.2f} {u_inertia}")
+        col2.metric("Jcy (Minor Axis)", f"{res['Jcy']:,.2f} {u_inertia}")
 
-    # --- Interactive Plot (Plotly) ---
+    # 3. Graphic (Plotly)
     st.markdown("---")
-    st.subheader("Section Diagram (Interactive)")
-    st.caption("🔍 Use the toolbar in the top right of the chart to **Zoom**, **Pan**, or **Reset View**.")
-
-    # 1. Prepare Data for Plotly
-    # Polygon Points
     px = [p[0] for p in points]
     py = [p[1] for p in points]
-    
-    # Close loop for filling
     if col_type == "Interior":
         px.append(points[0][0])
         py.append(points[0][1])
-        fill_opt = 'toself'
-    else:
-        fill_opt = 'none' # Open shapes usually don't fill nicely unless closed manually
 
-    # Column Box
-    cx_box_x = [-Cx/2, Cx/2, Cx/2, -Cx/2, -Cx/2]
-    cx_box_y = [Cy/2, Cy/2, -Cy/2, -Cy/2, Cy/2]
-
-    # 2. Create Figure
     fig = go.Figure()
-
-    # Trace: Column
+    # Column
     fig.add_trace(go.Scatter(
-        x=cx_box_x, y=cx_box_y,
-        fill="toself",
-        fillcolor="rgba(128, 128, 128, 0.5)", # Gray transparency
-        line=dict(color="gray", width=2),
-        name="Column"
+        x=[-Cx/2, Cx/2, Cx/2, -Cx/2, -Cx/2], y=[Cy/2, Cy/2, -Cy/2, -Cy/2, Cy/2],
+        fill="toself", fillcolor="rgba(128,128,128,0.3)", line=dict(color="gray"), name="Column"
     ))
-
-    # Trace: Critical Section
+    # Section
     fig.add_trace(go.Scatter(
-        x=px, y=py,
-        mode='lines+markers',
-        line=dict(color='blue', width=3),
-        marker=dict(size=6),
-        name="Critical Section"
+        x=px, y=py, mode='lines+markers', line=dict(color='blue', width=3), name="Critical Section"
     ))
-
-    # Trace: Centroid
+    # Centroid
     fig.add_trace(go.Scatter(
-        x=[res['Centroid'][0]], y=[res['Centroid'][1]],
-        mode='markers',
-        marker=dict(color='red', size=12, symbol='cross'),
-        name="Centroid"
+        x=[res['Centroid'][0]], y=[res['Centroid'][1]], mode='markers',
+        marker=dict(color='red', size=10, symbol='cross'), name="Centroid"
     ))
-    
-    # Trace: Column Center
-    fig.add_trace(go.Scatter(
-        x=[0], y=[0],
-        mode='markers',
-        marker=dict(color='black', size=10, symbol='x'),
-        name="Col Center"
-    ))
-
-    # 3. Layout Settings (On-Scale & Interaction)
     fig.update_layout(
-        title=f"Critical Section Geometry ({col_type})",
-        xaxis_title=f"Distance X ({u_len})",
-        yaxis_title=f"Distance Y ({u_len})",
-        showlegend=True,
-        width=700,
-        height=700,
-        # Ensure aspect ratio is 1:1 (On-scale)
-        yaxis=dict(
-            scaleanchor="x",
-            scaleratio=1,
-        ),
-        hovermode="closest"
+        title="Critical Section Geometry", 
+        width=700, height=600, yaxis=dict(scaleanchor="x", scaleratio=1), hovermode="closest"
     )
-
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- Detailed Data Table (FIXED) ---
-    with st.expander("See Calculation Details (Segments)"):
-        # Create a new list of dicts to flatten tuples for proper formatting
-        seg_data_flat = []
-        for i, s in enumerate(res['segments']):
-            seg_data_flat.append({
-                "Segment": i + 1,
-                "x_start": s['p1'][0],
-                "y_start": s['p1'][1],
-                "x_end": s['p2'][0],
-                "y_end": s['p2'][1],
-                "Length": s['l'],
-                "Centroid X": s['xm'],
-                "Centroid Y": s['ym']
-            })
+    # 4. Detailed Report (Tahoma Font)
+    st.markdown("---")
+    st.subheader("📝 Detailed Analysis Report")
+    
+    # HTML String Builder for Classic Report
+    html_report = f"""
+    <div style="font-family: Tahoma, sans-serif; font-size: 14px; line-height: 1.6; color: #333; background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+        <h3 style="color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 5px;">1. Critical Section Geometry</h3>
+        <p><strong>Column Dimensions:</strong> {Cx} x {Cy} {u_len} <br>
+        <strong>Effective Depth (d):</strong> {d} {u_len} <br>
+        <strong>Distance to Critical Section:</strong> {dist_val:.2f} {u_len}</p>
         
-        df_seg = pd.DataFrame(seg_data_flat)
+        <h4 style="color: #444;">Coordinates of Critical Section (Relative to Column Center)</h4>
+        <table style="width: 100%; border-collapse: collapse; font-family: Tahoma, sans-serif;">
+            <tr style="background-color: #e0e0e0;">
+                <th style="border: 1px solid #ccc; padding: 5px; text-align: center;">Point</th>
+                <th style="border: 1px solid #ccc; padding: 5px; text-align: center;">X ({u_len})</th>
+                <th style="border: 1px solid #ccc; padding: 5px; text-align: center;">Y ({u_len})</th>
+            </tr>
+    """
+    
+    # Loop points for table
+    for i, pt in enumerate(points):
+        html_report += f"""
+            <tr>
+                <td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{i+1}</td>
+                <td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{pt[0]:.2f}</td>
+                <td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{pt[1]:.2f}</td>
+            </tr>
+        """
         
-        # Apply formatting to specific float columns
-        st.dataframe(
-            df_seg.style.format({
-                "x_start": "{:.2f}", "y_start": "{:.2f}",
-                "x_end": "{:.2f}", "y_end": "{:.2f}",
-                "Length": "{:.2f}",
-                "Centroid X": "{:.2f}", "Centroid Y": "{:.2f}"
-            })
-        )
+    html_report += f"""
+        </table>
+        
+        <h3 style="color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 5px; margin-top: 20px;">2. Centroid Calculation</h3>
+        <p>The centroid of the critical shear perimeter (line) is calculated as:</p>
+        <ul>
+            <li><strong>Total Perimeter (bo):</strong> {res['bo']:.2f} {u_len}</li>
+            <li><strong>Shear Area (Ac):</strong> {res['Ac']:.2f} {u_area}</li>
+            <li><strong>Centroid X (x̄):</strong> {res['Centroid'][0]:.2f} {u_len}</li>
+            <li><strong>Centroid Y (ȳ):</strong> {res['Centroid'][1]:.2f} {u_len}</li>
+        </ul>
+        
+        <h3 style="color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 5px; margin-top: 20px;">3. Extreme Fiber Distances (c)</h3>
+        <p>Distance from Centroid to extreme points of the critical section (used for stress analysis Mc/J):</p>
+        <ul>
+            <li><strong>c<sub>x, max</sub> (Right):</strong> {res['extreme']['cx_pos']:.2f} {u_len}</li>
+            <li><strong>c<sub>x, min</sub> (Left):</strong> {res['extreme']['cx_neg']:.2f} {u_len}</li>
+            <li><strong>c<sub>y, max</sub> (Top):</strong> {res['extreme']['cy_pos']:.2f} {u_len}</li>
+            <li><strong>c<sub>y, min</sub> (Bottom):</strong> {res['extreme']['cy_neg']:.2f} {u_len}</li>
+        </ul>
+        
+        <h3 style="color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 5px; margin-top: 20px;">4. Moment of Inertia (J) Analysis</h3>
+        <p>Calculated using the summation of segments method (ACI 421.1R-20 Appendix B):</p>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-family: Tahoma, sans-serif;">
+            <tr style="background-color: #e0e0e0;">
+                <th style="border: 1px solid #ccc; padding: 8px;">Property</th>
+                <th style="border: 1px solid #ccc; padding: 8px;">Value ({u_inertia})</th>
+                <th style="border: 1px solid #ccc; padding: 8px;">Description</th>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #ccc; padding: 8px;"><strong>J<sub>cx</sub></strong></td>
+                <td style="border: 1px solid #ccc; padding: 8px; text-align: right;">{res['Jcx']:,.2f}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">Moment of Inertia about X-axis</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #ccc; padding: 8px;"><strong>J<sub>cy</sub></strong></td>
+                <td style="border: 1px solid #ccc; padding: 8px; text-align: right;">{res['Jcy']:,.2f}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">Moment of Inertia about Y-axis</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #ccc; padding: 8px;"><strong>J<sub>xy</sub></strong></td>
+                <td style="border: 1px solid #ccc; padding: 8px; text-align: right;">{res['Jxy']:,.2f}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">Product of Inertia</td>
+            </tr>
+    """
+    
+    if is_unsymmetric:
+        html_report += f"""
+            <tr style="background-color: #fff3cd;">
+                <td style="border: 1px solid #ccc; padding: 8px;"><strong>J<sub>major</sub></strong></td>
+                <td style="border: 1px solid #ccc; padding: 8px; text-align: right; font-weight: bold;">{res['J_major']:,.2f}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">Principal Moment (Max)</td>
+            </tr>
+            <tr style="background-color: #fff3cd;">
+                <td style="border: 1px solid #ccc; padding: 8px;"><strong>J<sub>minor</sub></strong></td>
+                <td style="border: 1px solid #ccc; padding: 8px; text-align: right; font-weight: bold;">{res['J_minor']:,.2f}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">Principal Moment (Min)</td>
+            </tr>
+        """
+    
+    html_report += """
+        </table>
+        <p style="font-size: 12px; color: #666; margin-top: 15px;">* Calculated according to ACI 421.1R-20 Appendix B equations B.8, B.9, B.11</p>
+    </div>
+    """
+    
+    st.markdown(html_report, unsafe_allow_html=True)
